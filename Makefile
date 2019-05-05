@@ -2,6 +2,9 @@ BASEDIR = $(shell pwd)
 REBAR = ./rebar3
 RELPATH = _build/default/rel/unir
 PRODRELPATH = _build/prod/rel/unir
+DEV1RELPATH = _build/dev1/rel/unir
+DEV2RELPATH = _build/dev2/rel/unir
+DEV3RELPATH = _build/dev3/rel/unir
 APPNAME = unir
 SHELL = /bin/bash
 CONCURRENCY 	 ?= 4
@@ -219,12 +222,21 @@ test: kill release
 
 devrel1:
 	$(REBAR) as dev1 release
+	mkdir -p $(DEV1RELPATH)/../unir_config
+	[ -f $(DEV1RELPATH)/../unir_config/unir.conf ] || cp $(DEV1RELPATH)/etc/unir.conf  $(DEV1RELPATH)/../unir_config/unir.conf
+	[ -f $(DEV1RELPATH)/../unir_config/advanced.config ] || cp $(DEV1RELPATH)/etc/advanced.config  $(DEV1RELPATH)/../unir_config/advanced.config
 
 devrel2:
 	$(REBAR) as dev2 release
+	mkdir -p $(DEV2RELPATH)/../unir_config
+	[ -f $(DEV2RELPATH)/../unir_config/unir.conf ] || cp $(DEV2RELPATH)/etc/unir.conf  $(DEV2RELPATH)/../unir_config/unir.conf
+	[ -f $(DEV2RELPATH)/../unir_config/advanced.config ] || cp $(DEV2RELPATH)/etc/advanced.config  $(DEV2RELPATH)/../unir_config/advanced.config
 
 devrel3:
 	$(REBAR) as dev3 release
+	mkdir -p $(DEV3RELPATH)/../unir_config
+	[ -f $(DEV3RELPATH)/../unir_config/unir.conf ] || cp $(DEV3RELPATH)/etc/unir.conf  $(DEV3RELPATH)/../unir_config/unir.conf
+	[ -f $(DEV3RELPATH)/../unir_config/advanced.config ] || cp $(DEV3RELPATH)/etc/advanced.config  $(DEV3RELPATH)/../unir_config/advanced.config
 
 devrel: devrel1 devrel2 devrel3
 
