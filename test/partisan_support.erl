@@ -58,6 +58,7 @@ start(_Case, Config, Options) ->
                             ct:pal("Starting node: ~p", [Name]),
 
                             NodeConfig = [{monitor_master, true},
+                                          {erl_flags, "+K true -smp"}, %% smp for the eleveldb god
                                           {startup_functions, [{code, set_path, [codepath()]}]}],
 
                             case ct_slave:start(Name, NodeConfig) of
@@ -125,7 +126,12 @@ start(_Case, Config, Options) ->
                               true ->
                                   false;
                               _ ->
-                                  false
+                                  case ?config(disterl, Config) of
+                                      true ->
+                                          true;
+                                      _ ->
+                                        false
+                                  end
                           end,
             ct:pal("Setting disterl to: ~p", [Disterl]),
             ok = rpc:call(Node, partisan_config, set, [disterl, Disterl]),
@@ -175,6 +181,15 @@ start(_Case, Config, Options) ->
                           end,
             ct:pal("Setting parallelism to: ~p", [Parallelism]),
             ok = rpc:call(Node, partisan_config, set, [parallelism, Parallelism]),
+
+            VnodePartitioning = case ?config(vnode_partitioning, Config) of
+                              undefined ->
+                                  false;
+                              VP ->
+                                  VP
+                          end,
+            ct:pal("Setting vnode_partitioning to: ~p", [VnodePartitioning]),
+            ok = rpc:call(Node, partisan_config, set, [vnode_partitioning, VnodePartitioning]),
 
             Servers = proplists:get_value(servers, Options, []),
             Clients = proplists:get_value(clients, Options, []),

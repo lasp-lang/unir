@@ -63,7 +63,7 @@ end_per_testcase(Case, Config) ->
     Config.
 
 init_per_group(disterl, Config) ->
-    Config;
+    [{disterl, true}] ++ Config;
 
 init_per_group(partisan, Config) ->
     [{pid_encoding, false}, {partisan_dispatch, true}] ++ Config;
@@ -159,6 +159,7 @@ partisan_performance_test(Config) ->
             %% Start nodes.
             partisan_support:start(partisan_performance_test, Config,
                                    [{partisan_peer_service_manager, Manager},
+                                   {sync_join, true},
                                    {servers, Servers},
                                    {clients, Clients}]);
         _ ->
@@ -229,8 +230,8 @@ partisan_performance_test(Config) ->
         P ->
             P
     end,
-        
-    NumMessages = 1000,
+
+    NumMessages = 10000,
     BenchPid = self(),
     BytesSize = Size * 1024,
 
@@ -241,13 +242,23 @@ partisan_performance_test(Config) ->
     %% Spawn processes to send receive messages on node 1.
     ct:pal("Spawning processes."),
     SenderPids = lists:map(fun(SenderNum) ->
+	PartitionKey = case rpc:call(Node1, partisan_config, get, [vnode_partitioning]) of
+		undefined ->
+			undefined;
+		false ->
+			undefined; 
+		true ->
+			SenderNum
+	end,
+	lager:warning("******** USING PARITION KEY FOR SENDER: ~p", [PartitionKey]),
+        
         ReceiverFun = fun() ->
-            receiver(Manager, BenchPid, NumMessages)
+            receiver(Manager, BenchPid, NumMessages, [])
         end,
         ReceiverPid = rpc:call(Node2, erlang, spawn, [ReceiverFun]),
 
         SenderFun = fun() ->
-            init_sender(EchoBinary, Manager, Node2, ReceiverPid, SenderNum, NumMessages)
+            init_sender(EchoBinary, Manager, Node2, ReceiverPid, PartitionKey, NumMessages)
         end,
         SenderPid = rpc:call(Node1, erlang, spawn, [SenderFun]),
         SenderPid
@@ -263,7 +274,7 @@ partisan_performance_test(Config) ->
         %% Wait for them all.
         bench_receiver(Concurrency)
     end,
-    {Time, _Value} = timer:tc(ProfileFun),
+    {Time, Tdiffs} = timer:tc(ProfileFun),
 
     %% Write results.
     RootDir = root_dir(Config),
@@ -290,7 +301,16 @@ partisan_performance_test(Config) ->
         VP ->
             VP
     end,
-    io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [App, Backend, Concurrency, NumChannels, false, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]),
+    ct:pal("Tdiffs are: ~p", [Tdiffs]),
+    case Tdiffs of
+        [] ->
+            io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [App, Backend, Concurrency, NumChannels, false, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]);
+        Tdiffs when is_list(Tdiffs) ->
+            lists:foreach(fun(Tdiff) ->
+                io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [App, Backend, Concurrency, NumChannels, false, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Tdiff])
+            end, Tdiffs)
+    end,
+
     file:close(FileHandle),
 
     case Profile of
@@ -358,7 +378,7 @@ echo_performance_test(Config) ->
             P
     end,
         
-    NumMessages = 1000,
+    NumMessages = 100000,
     BenchPid = self(),
     BytesSize = Size * 1024,
 
@@ -387,7 +407,7 @@ echo_performance_test(Config) ->
         %% Wait for them all.
         bench_receiver(length(SenderPids))
     end,
-    {Time, _Value} = timer:tc(ProfileFun),
+    {Time, Tdiffs} = timer:tc(ProfileFun),
 
     %% Write results.
     RootDir = root_dir(Config),
@@ -420,7 +440,14 @@ echo_performance_test(Config) ->
         MC ->
             MC
     end,
-    io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [echo, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]),
+    case Tdiffs of
+        [] ->
+            io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [echo, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]);
+        Tdiffs when is_list(Tdiffs) ->
+            lists:foreach(fun(Tdiff) ->
+                io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [echo, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Tdiff])
+            end, Tdiffs)
+    end,
     file:close(FileHandle),
 
     ct:pal("Time: ~p", [Time]),
@@ -477,7 +504,7 @@ fsm_performance_test(Config) ->
             P
     end,
         
-    NumMessages = 1000,
+    NumMessages = 100000,
     BenchPid = self(),
     BytesSize = Size * 1024,
 
@@ -506,7 +533,7 @@ fsm_performance_test(Config) ->
         %% Wait for them all.
         bench_receiver(length(SenderPids))
     end,
-    {Time, Value} = timer:tc(ProfileFun),
+    {Time, Tdiffs} = timer:tc(ProfileFun),
 
     %% Write results.
     RootDir = root_dir(Config),
@@ -539,10 +566,17 @@ fsm_performance_test(Config) ->
         VP ->
             VP
     end,
-    io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [kvs, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]),
+    case Tdiffs of
+        [] ->
+            io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [kvs, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Time]);
+        Tdiffs when is_list(Tdiffs) ->
+            lists:foreach(fun(Tdiff) ->
+                io:format(FileHandle, "~p,~p,~p,~p,~p,~p,~p,~p,~p,~p,~p~n", [kvs, Backend, Concurrency, NumChannels, MonotonicChannels, Parallelism, Partitioned, BytesSize, NumMessages, Latency, Tdiff])
+            end, Tdiffs)
+    end,
     file:close(FileHandle),
 
-    ct:pal("Value: ~p, Time: ~p", [Value, Time]),
+    ct:pal("Time: ~p", [Time]),
 
     %% Stop nodes.
     ?SUPPORT:stop(Nodes),
@@ -775,12 +809,22 @@ rand_bits(Bits) ->
         Result.
 
 %% @private
-echo_sender(BenchPid, _SenderNum, _EchoBinary, 0) ->
-    BenchPid ! done,
+echo_sender(BenchPid, _SenderNum, _EchoBinary, 0, Tdiffs) ->
+    BenchPid ! {done, Tdiffs},
     ok;
-echo_sender(BenchPid, SenderNum, EchoBinary, Count) ->
-    unir:echo(EchoBinary),
-    echo_sender(BenchPid, SenderNum, EchoBinary, Count - 1).
+echo_sender(BenchPid, SenderNum, EchoBinary, Count, Tdiffs) ->
+    receive
+        done ->
+            lager:info("Timer expired for experiment!"),
+            BenchPid ! {done, Tdiffs}
+    after
+        0 ->
+            StartTime = erlang:timestamp(),
+            unir:echo(EchoBinary),
+            EndTime = erlang:timestamp(),
+            Tdiff = timer:now_diff(EndTime, StartTime),
+            echo_sender(BenchPid, SenderNum, EchoBinary, Count - 1, Tdiffs ++ [Tdiff])
+    end.
 
 %% @private
 init_echo_sender(BenchPid, SenderNum, EchoBinary, Count) ->
@@ -788,34 +832,54 @@ init_echo_sender(BenchPid, SenderNum, EchoBinary, Count) ->
         start ->
             ok
     end,
-    echo_sender(BenchPid, SenderNum, EchoBinary, Count).
+    timer:send_after(120 * 1000, done),
+    echo_sender(BenchPid, SenderNum, EchoBinary, Count, []).
 
 %% @private
-fsm_sender(BenchPid, _SenderNum, _EchoBinary, Success, Failure, 0) ->
-    BenchPid ! {done, Success, Failure},
+fsm_sender(BenchPid, _SenderNum, _EchoBinary, Success, Failure, 0, Tdiffs) ->
+    BenchPid ! {done, Tdiffs},
     ok;
-fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure, Count) ->
-    %% Normal distribution over 10000 keys.
-    RandomNumber = trunc((rand:normal() + 1) * 5000),
+fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure, Count, Tdiffs) ->
+    receive
+        done ->
+            lager:info("Timer expired for experiment!"),
+            BenchPid ! {done, Tdiffs}
+    after
+        0 ->
+            StartTime = erlang:timestamp(),
+            %% Normal distribution over 10000 keys.
+            RandomNumber = trunc((rand:normal() + 1) * 5000),
 
-    %% Craft object name.
-    ObjectName = list_to_binary("object" ++ integer_to_list(RandomNumber)),
+            %% Craft object name.
+            ObjectName = list_to_binary("object" ++ integer_to_list(RandomNumber)),
 
-    %% 50/50 read/write workload.
-    case Count rem 2 == 0 of
-        true ->
-            case unir:fsm_put(ObjectName, EchoBinary) of
-                {ok, _Val} ->
-                    fsm_sender(BenchPid, SenderNum, EchoBinary, Success + 1, Failure, Count - 1);
-                {error, timeout} ->
-                    fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure + 1, Count - 1)
-            end;
-        false ->
-            case unir:fsm_get(ObjectName) of
-                {ok, _Val} ->
-                    fsm_sender(BenchPid, SenderNum, EchoBinary, Success + 1, Failure, Count - 1);
-                {error, timeout} ->
-                    fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure + 1, Count - 1)
+            case Count rem 100 == 0 of
+                true ->
+                    lager:info("~p has ~p messages remaining to be sent...", [self(), Count]);
+                _ ->
+                    ok
+            end,
+
+            %% 90/10 read/write workload.
+            case Count rem 10 == 0 of
+                true ->
+                    case unir:fsm_put(ObjectName, EchoBinary) of
+                        {ok, _Val} ->
+                            EndTime = erlang:timestamp(),
+                            Tdiff = timer:now_diff(EndTime, StartTime),
+                            fsm_sender(BenchPid, SenderNum, EchoBinary, Success + 1, Failure, Count - 1, Tdiffs ++ [Tdiff]);
+                        {error, timeout} ->
+                            fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure + 1, Count - 1, Tdiffs)
+                    end;
+                false ->
+                    case unir:fsm_get(ObjectName) of
+                        {ok, _Val} ->
+                            EndTime = erlang:timestamp(),
+                            Tdiff = timer:now_diff(EndTime, StartTime),
+                            fsm_sender(BenchPid, SenderNum, EchoBinary, Success + 1, Failure, Count - 1, Tdiffs ++ [Tdiff]);
+                        {error, timeout} ->
+                            fsm_sender(BenchPid, SenderNum, EchoBinary, Success, Failure + 1, Count - 1, Tdiffs)
+                    end
             end
     end.
 
@@ -825,7 +889,8 @@ init_fsm_sender(BenchPid, SenderNum, EchoBinary, Count) ->
         start ->
             ok
     end,
-    fsm_sender(BenchPid, SenderNum, EchoBinary, 0, 0, Count).
+    timer:send_after(120 * 1000, done),
+    fsm_sender(BenchPid, SenderNum, EchoBinary, 0, 0, Count, []).
 
 %% @private
 root_path(Config) ->
@@ -861,39 +926,52 @@ monotonic_channels() ->
 
 %% @private
 bench_receiver(Count) ->
-    bench_receiver(0, 0, Count).
+    bench_receiver(0, 0, Count, []).
 
 %% @private
-bench_receiver(Success, Failure, 0) ->
+bench_receiver(Success, Failure, 0, Tdiffs) ->
     ct:pal("Success: ~p, Failure: ~p", [Success, Failure]),
-    ok;
-bench_receiver(Success, Failure, Count) ->
+    lists:flatten(Tdiffs);
+bench_receiver(Success, Failure, Count, Tdiffs) ->
     ct:pal("Waiting for ~p processes to finish...", [Count]),
 
     receive
         done ->
-            ct:pal("Received, but still waiting for ~p", [Count -1]),
-            bench_receiver(Success, Failure, Count - 1);
+            ct:pal("Received, but still waiting for ~p", [Count - 1]),
+            bench_receiver(Success, Failure, Count - 1, Tdiffs);
+        {done, Tdiff} ->
+            ct:pal("Received, but still waiting for ~p", [Count - 1]),
+            bench_receiver(Success, Failure, Count - 1, Tdiffs ++ [Tdiff]);
         {done, S, F} ->
-            ct:pal("Received; success: ~p, failure: ~p; but still waiting for ~p", [S, F, Count -1]),
-            bench_receiver(Success + S, Failure + F, Count - 1)
+            ct:pal("Received; success: ~p, failure: ~p; but still waiting for ~p", [S, F, Count - 1]),
+            bench_receiver(Success + S, Failure + F, Count - 1, Tdiffs)
     end.
 
 %% @private
-receiver(_Manager, BenchPid, 0) ->
-    BenchPid ! done,
+receiver(_Manager, BenchPid, 0, Tdiffs) ->
+    BenchPid ! {done, Tdiffs},
     ok;
-receiver(Manager, BenchPid, Count) ->
+receiver(Manager, BenchPid, Count, Tdiffs) ->
     receive
         {_Message, _SourceNode, _SourcePid} ->
-            receiver(Manager, BenchPid, Count - 1)
+            receiver(Manager, BenchPid, Count - 1, Tdiffs);
+        {_Message, _SourceNode, SourcePid, StartTime} ->
+            EndTime = erlang:timestamp(),
+            SourcePid ! ok,
+            Tdiff = timer:now_diff(EndTime, StartTime),
+            receiver(Manager, BenchPid, Count - 1, Tdiffs ++ [Tdiff])
     end.
 
 %% @private
 sender(_EchoBinary, _Manager, _DestinationNode, _DestinationPid, _PartitionKey, 0) ->
     ok;
 sender(EchoBinary, Manager, DestinationNode, DestinationPid, PartitionKey, Count) ->
-    Manager:forward_message(DestinationNode, undefined, DestinationPid, {EchoBinary, node(), self()}, [{partition_key, PartitionKey}]),
+    StartTime = erlang:timestamp(),
+    Manager:forward_message(DestinationNode, undefined, DestinationPid, {EchoBinary, node(), self(), StartTime}, [{partition_key, PartitionKey}]),
+    receive
+        ok ->
+            ok
+    end,
     sender(EchoBinary, Manager, DestinationNode, DestinationPid, PartitionKey, Count - 1).
 
 %% @private
